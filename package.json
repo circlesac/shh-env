@@ -1,0 +1,23 @@
+{
+  "name": "shh-env",
+  "version": "0.0.1",
+  "description": "Load secrets from OS keychain and inject as environment variables",
+  "type": "module",
+  "bin": {
+    "shh-env": "./src/index.ts"
+  },
+  "scripts": {
+    "dev": "bun run src/index.ts",
+    "build": "bun build --compile --outfile=dist/shh-env src/index.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/bun": "latest"
+  },
+  "peerDependencies": {
+    "typescript": "^5"
+  },
+  "dependencies": {
+    "citty": "^0.2.0"
+  }
+}
