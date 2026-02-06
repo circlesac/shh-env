@@ -1,6 +1,6 @@
 {
   "name": "shh-env",
-  "version": "0.0.2",
+  "version": "0.0.3",
   "description": "Load secrets from OS keychain and inject as environment variables",
   "bin": {
     "shh-env": "bin/shh-env"
