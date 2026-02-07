@@ -1,88 +1,28 @@
 name: Release
 
 on:
-  push:
-    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      env:
+        type: choice
+        description: Environment
+        default: production
+        options:
+          - production
+          - dev
 
 permissions:
   contents: write
   id-token: write
 
 jobs:
-  build:
+  release:
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        include:
-          - target: bun-darwin-arm64
-            name: shh-env-darwin-arm64
-            ext: ""
-          - target: bun-darwin-x64
-            name: shh-env-darwin-x64
-            ext: ""
-          - target: bun-linux-x64
-            name: shh-env-linux-x64
-            ext: ""
-          - target: bun-linux-arm64
-            name: shh-env-linux-arm64
-            ext: ""
-          - target: bun-windows-x64
-            name: shh-env-windows-x64
-            ext: ".exe"
-
     steps:
       - uses: actions/checkout@v4
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
-
-      - name: Install dependencies
-        run: bun install
-
-      - name: Build
-        run: bun build --compile --target=${{ matrix.target }} --outfile=shh-env${{ matrix.ext }} src/index.ts
-
-      - name: Package (Unix)
-        if: matrix.ext == ''
-        run: tar czf ${{ matrix.name }}.tar.gz shh-env
-
-      - name: Package (Windows)
-        if: matrix.ext == '.exe'
-        run: 7z a ${{ matrix.name }}.zip shh-env.exe
-
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: ${{ matrix.name }}
-          path: ${{ matrix.name }}.*
-
-  github-release:
-    needs: build
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Download artifacts
-        uses: actions/download-artifact@v4
-        with:
-          path: artifacts
-
-      - name: Create release
-        uses: softprops/action-gh-release@v2
-        with:
-          files: |
-            artifacts/**/*.tar.gz
-            artifacts/**/*.zip
-          generate_release_notes: true
-
-  publish-npm:
-    needs: github-release
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      id-token: write
-    steps:
-      - uses: actions/checkout@v4
 
       - name: Setup Node
         uses: actions/setup-node@v4
@@ -90,29 +30,90 @@ jobs:
           node-version: 24
           registry-url: https://registry.npmjs.org
 
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Test
+        run: bun test
+
+      - name: Bump version
+        id: version
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          npx @circlesac/oneup version
+          VERSION=$(node -p "require('./package.json').version")
+
+          node -e "
+            const fs = require('fs');
+            const pkg = JSON.parse(fs.readFileSync('npm/package.json', 'utf8'));
+            pkg.version = '${VERSION}';
+            fs.writeFileSync('npm/package.json', JSON.stringify(pkg, null, 2) + '\n');
+          "
+          sed -i 's/version: ".*"/version: "'${VERSION}'"/' src/index.ts
+
+          git add npm/package.json src/index.ts
+          git commit --amend --no-edit
+          git tag -f "v${VERSION}"
+
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+
+      - name: Build darwin-arm64
+        run: |
+          bun build --compile --target=bun-darwin-arm64 --outfile=shh-env src/index.ts
+          tar czf shh-env-darwin-arm64.tar.gz shh-env
+          rm shh-env
+
+      - name: Build darwin-x64
+        run: |
+          bun build --compile --target=bun-darwin-x64 --outfile=shh-env src/index.ts
+          tar czf shh-env-darwin-x64.tar.gz shh-env
+          rm shh-env
+
+      - name: Build linux-x64
+        run: |
+          bun build --compile --target=bun-linux-x64 --outfile=shh-env src/index.ts
+          tar czf shh-env-linux-x64.tar.gz shh-env
+          rm shh-env
+
+      - name: Build linux-arm64
+        run: |
+          bun build --compile --target=bun-linux-arm64 --outfile=shh-env src/index.ts
+          tar czf shh-env-linux-arm64.tar.gz shh-env
+          rm shh-env
+
+      - name: Build windows-x64
+        run: |
+          bun build --compile --target=bun-windows-x64 --outfile=shh-env.exe src/index.ts
+          7z a shh-env-windows-x64.zip shh-env.exe
+          rm shh-env.exe
+
       - name: Publish to npm
-        run: npm publish --access public ./npm
+        run: npm publish --access public --tag ${{ inputs.env == 'production' && 'latest' || inputs.env }} ./npm
 
-  publish-homebrew:
-    needs: github-release
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
+      - name: Push
+        run: git push origin main --follow-tags
 
-      - name: Download artifacts
-        uses: actions/download-artifact@v4
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
         with:
-          path: artifacts
+          tag_name: v${{ steps.version.outputs.version }}
+          files: |
+            *.tar.gz
+            *.zip
+          generate_release_notes: true
+          prerelease: ${{ inputs.env != 'production' }}
 
       - name: Update Homebrew formula
+        if: inputs.env == 'production'
         env:
           GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
         run: |
-          VERSION=${GITHUB_REF_NAME#v}
-          SHA_DARWIN_ARM64=$(shasum -a 256 artifacts/shh-env-darwin-arm64/*.tar.gz | cut -d' ' -f1)
-          SHA_DARWIN_X64=$(shasum -a 256 artifacts/shh-env-darwin-x64/*.tar.gz | cut -d' ' -f1)
-          SHA_LINUX_ARM64=$(shasum -a 256 artifacts/shh-env-linux-arm64/*.tar.gz | cut -d' ' -f1)
-          SHA_LINUX_X64=$(shasum -a 256 artifacts/shh-env-linux-x64/*.tar.gz | cut -d' ' -f1)
+          VERSION=${{ steps.version.outputs.version }}
+          SHA_DARWIN_ARM64=$(shasum -a 256 shh-env-darwin-arm64.tar.gz | cut -d' ' -f1)
+          SHA_DARWIN_X64=$(shasum -a 256 shh-env-darwin-x64.tar.gz | cut -d' ' -f1)
+          SHA_LINUX_ARM64=$(shasum -a 256 shh-env-linux-arm64.tar.gz | cut -d' ' -f1)
+          SHA_LINUX_X64=$(shasum -a 256 shh-env-linux-x64.tar.gz | cut -d' ' -f1)
 
           git clone https://x-access-token:${GH_TOKEN}@github.com/circlesac/homebrew-tap.git
           cd homebrew-tap
