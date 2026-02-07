@@ -28,7 +28,7 @@ async function cli(
  * Integration tests that exercise the CLI end-to-end.
  * These interact with the real OS keychain.
  */
-describe("CLI integration", () => {
+describe.skipIf(!!process.env.CI)("CLI integration", () => {
   async function cleanup() {
     await cli("delete", "TEST_A", "--service", TEST_SERVICE).catch(() => {});
     await cli("delete", "TEST_B", "--service", TEST_SERVICE).catch(() => {});
