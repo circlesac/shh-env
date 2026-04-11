@@ -20,7 +20,7 @@ import runCommand from "./commands/run";
 const main = defineCommand({
   meta: {
     name: "shh-env",
-    version: "26.2.2",
+    version: "26.4.1",
     description:
       "Load secrets from OS keychain and inject as environment variables",
   },
