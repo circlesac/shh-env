@@ -35,8 +35,6 @@ jobs:
       - name: Bump version
         id: version
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
           npx @circlesac/oneup version
           VERSION=$(node -p "require('./package.json').version")
 
@@ -47,10 +45,6 @@ jobs:
             fs.writeFileSync('npm/package.json', JSON.stringify(pkg, null, 2) + '\n');
           "
           sed -i 's/version: ".*"/version: "'${VERSION}'"/' src/index.ts
-
-          git add package.json npm/package.json src/index.ts
-          git commit --amend --no-edit
-          git tag -f "v${VERSION}"
 
           echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
 
@@ -132,12 +126,12 @@ jobs:
         with:
           name: versioned-files
 
-      - name: Reapply version commit
+      - name: Commit version bump
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add package.json npm/package.json src/index.ts
-          git commit --amend --no-edit
+          git commit -m "Release v${{ needs.version.outputs.version }}"
           git tag -f "v${{ needs.version.outputs.version }}"
 
       - uses: actions/download-artifact@v4
