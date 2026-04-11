@@ -101,6 +101,10 @@ jobs:
             zip ${{ matrix.name }}.zip shh-env.exe
           else
             bun build --compile --target=${{ matrix.target }} --outfile=shh-env src/index.ts
+            if [[ "${{ matrix.target }}" == bun-darwin-* ]]; then
+              codesign --remove-signature shh-env
+              codesign --force --deep -s - shh-env
+            fi
             tar czf ${{ matrix.name }}.tar.gz shh-env
           fi
 
