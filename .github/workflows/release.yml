@@ -16,22 +16,18 @@ permissions:
   id-token: write
 
 jobs:
-  release:
+  version:
     runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
     steps:
       - uses: actions/checkout@v4
-
-      - name: Setup Bun
-        uses: oven-sh/setup-bun@v2
-
-      - name: Setup Node
-        uses: actions/setup-node@v4
         with:
-          node-version: 24
-          registry-url: https://registry.npmjs.org
+          fetch-depth: 0
 
-      - name: Install dependencies
-        run: bun install --frozen-lockfile
+      - uses: oven-sh/setup-bun@v2
+
+      - run: bun install --frozen-lockfile
 
       - name: Test
         run: bun test
@@ -52,41 +48,106 @@ jobs:
           "
           sed -i 's/version: ".*"/version: "'${VERSION}'"/' src/index.ts
 
-          git add npm/package.json src/index.ts
+          git add package.json npm/package.json src/index.ts
           git commit --amend --no-edit
           git tag -f "v${VERSION}"
 
           echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
 
-      - name: Build darwin-arm64
-        run: |
-          bun build --compile --target=bun-darwin-arm64 --outfile=shh-env src/index.ts
-          tar czf shh-env-darwin-arm64.tar.gz shh-env
-          rm shh-env
+      - uses: actions/upload-artifact@v4
+        with:
+          name: versioned-files
+          path: |
+            package.json
+            npm/package.json
+            src/index.ts
 
-      - name: Build darwin-x64
-        run: |
-          bun build --compile --target=bun-darwin-x64 --outfile=shh-env src/index.ts
-          tar czf shh-env-darwin-x64.tar.gz shh-env
-          rm shh-env
+  build:
+    needs: version
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          - os: macos-latest
+            target: bun-darwin-arm64
+            name: shh-env-darwin-arm64
+            ext: tar.gz
+          - os: macos-latest
+            target: bun-darwin-x64
+            name: shh-env-darwin-x64
+            ext: tar.gz
+          - os: ubuntu-latest
+            target: bun-linux-x64
+            name: shh-env-linux-x64
+            ext: tar.gz
+          - os: ubuntu-latest
+            target: bun-linux-arm64
+            name: shh-env-linux-arm64
+            ext: tar.gz
+          - os: ubuntu-latest
+            target: bun-windows-x64
+            name: shh-env-windows-x64
+            ext: zip
+    steps:
+      - uses: actions/checkout@v4
 
-      - name: Build linux-x64
-        run: |
-          bun build --compile --target=bun-linux-x64 --outfile=shh-env src/index.ts
-          tar czf shh-env-linux-x64.tar.gz shh-env
-          rm shh-env
+      - uses: oven-sh/setup-bun@v2
 
-      - name: Build linux-arm64
-        run: |
-          bun build --compile --target=bun-linux-arm64 --outfile=shh-env src/index.ts
-          tar czf shh-env-linux-arm64.tar.gz shh-env
-          rm shh-env
+      - run: bun install --frozen-lockfile
 
-      - name: Build windows-x64
+      - uses: actions/download-artifact@v4
+        with:
+          name: versioned-files
+
+      - name: Build
+        shell: bash
         run: |
-          bun build --compile --target=bun-windows-x64 --outfile=shh-env.exe src/index.ts
-          7z a shh-env-windows-x64.zip shh-env.exe
-          rm shh-env.exe
+          if [ "${{ matrix.target }}" = "bun-windows-x64" ]; then
+            bun build --compile --target=${{ matrix.target }} --outfile=shh-env.exe src/index.ts
+            zip ${{ matrix.name }}.zip shh-env.exe
+          else
+            bun build --compile --target=${{ matrix.target }} --outfile=shh-env src/index.ts
+            tar czf ${{ matrix.name }}.tar.gz shh-env
+          fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.name }}
+          path: ${{ matrix.name }}.${{ matrix.ext }}
+
+  publish:
+    needs: [version, build]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: versioned-files
+
+      - name: Reapply version commit
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add package.json npm/package.json src/index.ts
+          git commit --amend --no-edit
+          git tag -f "v${{ needs.version.outputs.version }}"
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Move tarballs to root
+        run: |
+          find artifacts -name "*.tar.gz" -exec cp {} . \;
+          find artifacts -name "*.zip" -exec cp {} . \;
 
       - name: Publish to npm
         run: npm publish --access public --tag ${{ inputs.env == 'production' && 'latest' || inputs.env }} ./npm
@@ -97,7 +158,7 @@ jobs:
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v${{ steps.version.outputs.version }}
+          tag_name: v${{ needs.version.outputs.version }}
           files: |
             *.tar.gz
             *.zip
@@ -109,7 +170,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
         run: |
-          VERSION=${{ steps.version.outputs.version }}
+          VERSION=${{ needs.version.outputs.version }}
           SHA_DARWIN_ARM64=$(shasum -a 256 shh-env-darwin-arm64.tar.gz | cut -d' ' -f1)
           SHA_DARWIN_X64=$(shasum -a 256 shh-env-darwin-x64.tar.gz | cut -d' ' -f1)
           SHA_LINUX_ARM64=$(shasum -a 256 shh-env-linux-arm64.tar.gz | cut -d' ' -f1)
