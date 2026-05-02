@@ -160,6 +160,7 @@ jobs:
           files: |
             *.tar.gz
             *.zip
+            bin/install.sh
           generate_release_notes: true
           prerelease: ${{ inputs.env != 'production' }}
 

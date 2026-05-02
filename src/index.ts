@@ -16,6 +16,7 @@ import getCommand from "./commands/get";
 import deleteCommand from "./commands/delete";
 import listCommand from "./commands/list";
 import runCommand from "./commands/run";
+import { checkForUpdate } from "./lib/update-check";
 
 const main = defineCommand({
   meta: {
@@ -33,4 +34,5 @@ const main = defineCommand({
   },
 });
 
+await checkForUpdate();
 runMain(main);
