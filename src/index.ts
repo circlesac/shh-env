@@ -21,7 +21,7 @@ import { checkForUpdate } from "./lib/update-check";
 const main = defineCommand({
   meta: {
     name: "shh-env",
-    version: "26.4.2",
+    version: "26.5.0",
     description:
       "Load secrets from OS keychain and inject as environment variables",
   },
